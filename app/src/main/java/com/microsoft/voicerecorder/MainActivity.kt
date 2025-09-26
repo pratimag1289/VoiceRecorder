@@ -5,6 +5,7 @@ import android.app.AlertDialog
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
+import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaPlayer
@@ -74,6 +75,8 @@ class MainActivity : ComponentActivity() {
     private var isRunningExperiment by mutableStateOf(false)
     private var experimentStatus by mutableStateOf("")
 
+    private var selectedRecordingMethod by mutableStateOf("MediaRecorder")
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         prefs = getSharedPreferences("voicerecorder_prefs", MODE_PRIVATE)
@@ -83,6 +86,23 @@ class MainActivity : ComponentActivity() {
             VoiceRecorderTheme {
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
                     MainScreen(innerPadding)
+                }
+            }
+        }
+    }
+
+    @Composable
+    fun RecordingMethodSelector(selectedMethod: String, onMethodSelected: (String) -> Unit) {
+        val methods = listOf("MediaRecorder", "MediaCodec", "libopus")
+        Text("🎛️ Select Recording Method", style = MaterialTheme.typography.titleMedium)
+        Column {
+            methods.forEach { method ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    RadioButton(
+                        selected = selectedMethod == method,
+                        onClick = { onMethodSelected(method) }
+                    )
+                    Text(method, modifier = Modifier.clickable { onMethodSelected(method) })
                 }
             }
         }
@@ -121,7 +141,6 @@ class MainActivity : ComponentActivity() {
                         Text("Select Format", style = MaterialTheme.typography.titleMedium)
                         FormatSelector(
                             selectedFormat = selectedFormat,
-                            enabled = !useEncoderDefaults,
                             onFormatSelected = { selectedFormat = it }
                         )
                         Spacer(modifier = Modifier.height(12.dp))
@@ -333,25 +352,71 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun detectMime(filePath: String): String {
-        return try {
-            val extractor = MediaExtractor()
-            extractor.setDataSource(filePath)
-            var found: String? = null
-            for (i in 0 until extractor.trackCount) {
-                val format = extractor.getTrackFormat(i)
-                val mime = format.getString(MediaFormat.KEY_MIME)
-                if (mime != null && mime.startsWith("audio/")) {
-                    found = mime
-                    break
+    private fun startMediaCodecRecording() {
+        try {
+            val codec = MediaCodec.createEncoderByType("audio/opus")
+            val format = MediaFormat.createAudioFormat("audio/opus", sampleRate, 1)
+            format.setInteger(MediaFormat.KEY_BIT_RATE, bitRate)
+            format.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 16384)
+
+            codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+            codec.start()
+
+            val outputFile = File(getExternalFilesDir(Environment.DIRECTORY_MUSIC), "recording_${System.currentTimeMillis()}.opus")
+            val outputStream = outputFile.outputStream()
+
+            val bufferInfo = MediaCodec.BufferInfo()
+            isRecording = true
+
+            Thread {
+                try {
+                    while (isRecording) {
+                        val outputBufferIndex = codec.dequeueOutputBuffer(bufferInfo, 10000)
+                        if (outputBufferIndex >= 0) {
+                            val encodedData = codec.getOutputBuffer(outputBufferIndex)
+                            if (encodedData != null && bufferInfo.size > 0) {
+                                val buffer = ByteArray(bufferInfo.size)
+                                encodedData.get(buffer)
+                                encodedData.clear()
+                                outputStream.write(buffer)
+                            }
+                            codec.releaseOutputBuffer(outputBufferIndex, false)
+                        }
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                } finally {
+                    codec.stop()
+                    codec.release()
+                    outputStream.close()
                 }
-            }
-            extractor.release()
-            found ?: "unknown"
+            }.start()
+
+            Toast.makeText(this, "MediaCodec recording started", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
             e.printStackTrace()
-            "unknown"
+            Toast.makeText(this, "Failed to start MediaCodec recording: ${e.message}", Toast.LENGTH_SHORT).show()
         }
+    }
+
+    private fun stopMediaCodecRecording() {
+        try {
+            isRecording = false
+            Toast.makeText(this, "MediaCodec recording stopped", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            e.printStackTrace()
+            Toast.makeText(this, "Failed to stop MediaCodec recording: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun startLibOpusRecording() {
+        // Placeholder for libopus recording implementation
+        Toast.makeText(this, "libopus recording started (not implemented yet)", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun stopLibOpusRecording() {
+        // Placeholder for stopping libopus recording
+        Toast.makeText(this, "libopus recording stopped (not implemented yet)", Toast.LENGTH_SHORT).show()
     }
 
     private fun detectAudioProperties(filePath: String): Triple<String, Int, Int> {
@@ -448,7 +513,14 @@ class MainActivity : ComponentActivity() {
              preparePlayback()
              Toast.makeText(this, "File generated!", Toast.LENGTH_SHORT).show()
         } else {
-            startRecording()
+            // Set the recording start time when recording begins
+            recordingStartTime = System.currentTimeMillis()
+
+            when (selectedRecordingMethod) {
+                "MediaRecorder" -> startRecording()
+                "MediaCodec" -> startMediaCodecRecording()
+                "libopus" -> startLibOpusRecording()
+            }
         }
     }
 
@@ -548,13 +620,12 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun FormatSelector(
     selectedFormat: String,
-    enabled: Boolean = true,
     onFormatSelected: (String) -> Unit
 ) {
     val formats = listOf(".m4a", ".opus")
     var expanded by remember { mutableStateOf(false) }
-    Box {
-        Text("$selectedFormat", modifier = Modifier.clickable(enabled = enabled) { if (enabled) expanded = true })
+    Row {
+        Text(selectedFormat, modifier = Modifier.clickable(true) { expanded = true })
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             formats.forEach { format ->
                 DropdownMenuItem(text = { Text(format) }, onClick = {
@@ -603,6 +674,7 @@ fun SampleRateSelector(selectedSampleRate: Int, enabled: Boolean = true, onSampl
 @Composable
 fun PlaybackSeekBar(position: Float, duration: Int, isPlaying: Boolean, onSeek: (Float) -> Unit) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
+
         Slider(
             value = position,
             onValueChange = onSeek,
@@ -610,21 +682,5 @@ fun PlaybackSeekBar(position: Float, duration: Int, isPlaying: Boolean, onSeek: 
             modifier = Modifier.fillMaxWidth(0.8f)
         )
         Text("${(position * duration / 1000).toInt()}s / ${duration / 1000}s")
-    }
-}
-
-@Composable
-fun Greeting(name: String, modifier: Modifier = Modifier) {
-    Text(
-        text = "Hello $name!",
-        modifier = modifier
-    )
-}
-
-@Preview(showBackground = true)
-@Composable
-fun GreetingPreview() {
-    VoiceRecorderTheme {
-        Greeting("Android")
     }
 }
