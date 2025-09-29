@@ -5,7 +5,6 @@ import android.app.AlertDialog
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
-import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaPlayer
@@ -19,13 +18,15 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.annotation.RequiresPermission
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -35,6 +36,7 @@ import java.io.File
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.io.IOException
 
 class MainActivity : ComponentActivity() {
     private var isRecording by mutableStateOf(false)
@@ -114,91 +116,131 @@ class MainActivity : ComponentActivity() {
             Column(
                 modifier = Modifier
                     .padding(innerPadding)
-                    .fillMaxSize(),
-                verticalArrangement = Arrangement.Top,
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Spacer(modifier = Modifier.height(24.dp))
-                Text("🎙️ Voice Recorder", style = MaterialTheme.typography.headlineMedium)
-                Spacer(modifier = Modifier.height(24.dp))
+                // Header Section
+                Text(
+                    text = "🎙️ Voice Recorder",
+                    style = MaterialTheme.typography.headlineMedium,
+                    modifier = Modifier.padding(top = 24.dp)
+                )
+
+                // Recording Settings Section
                 Card(
                     modifier = Modifier
                         .fillMaxWidth(0.95f)
-                        .padding(8.dp),
+                        .padding(horizontal = 8.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
                 ) {
                     Column(
-                        modifier = Modifier
-                            .padding(16.dp)
-                            .fillMaxWidth(),
-                        horizontalAlignment = Alignment.CenterHorizontally
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        horizontalAlignment = Alignment.Start
                     ) {
+
+                        // Recording Method Selector
+                        RecordingMethodSelector(
+                            selectedMethod = selectedRecordingMethod,
+                            onMethodSelected = { selectedRecordingMethod = it }
+                        )
+
+                        // Format Selector
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Format", modifier = Modifier.weight(1f))
+                            FormatSelector(
+                                selectedFormat = selectedFormat,
+                                onFormatSelected = { selectedFormat = it }
+                            )
+                        }
+
+                        // Encoder Defaults Toggle
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text("Use encoder defaults", modifier = Modifier.weight(1f))
                             Switch(checked = useEncoderDefaults, onCheckedChange = { useEncoderDefaults = it })
                         }
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Text("Select Format", style = MaterialTheme.typography.titleMedium)
-                        FormatSelector(
-                            selectedFormat = selectedFormat,
-                            onFormatSelected = { selectedFormat = it }
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Text("Select Bitrate", style = MaterialTheme.typography.titleMedium)
-                        BitrateSelector(
-                            selectedBitrate = bitRate,
-                            enabled = !useEncoderDefaults,
-                            onBitrateSelected = { bitRate = it }
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Text("Select Sample Rate", style = MaterialTheme.typography.titleMedium)
-                        SampleRateSelector(
-                            selectedSampleRate = sampleRate,
-                            enabled = !useEncoderDefaults,
-                            onSampleRateSelected = { sampleRate = it }
-                        )
-                        if (useEncoderDefaults) {
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text("Using device/encoder defaults for sample rate & bitrate", style = MaterialTheme.typography.bodySmall)
+
+                        // Bitrate and Sample Rate Selectors
+                        if (!useEncoderDefaults) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("Bitrate", modifier = Modifier.weight(1f))
+                                BitrateSelector(
+                                    selectedBitrate = bitRate,
+                                    enabled = true,
+                                    onBitrateSelected = { bitRate = it }
+                                )
+                            }
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("Sample Rate", modifier = Modifier.weight(1f))
+                                SampleRateSelector(
+                                    selectedSampleRate = sampleRate,
+                                    enabled = true,
+                                    onSampleRateSelected = { sampleRate = it }
+                                )
+                            }
                         }
                     }
                 }
-                Spacer(modifier = Modifier.height(16.dp))
+
+                // Controls Section
                 Card(
                     modifier = Modifier
                         .fillMaxWidth(0.95f)
-                        .padding(8.dp),
+                        .padding(horizontal = 8.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f))
                 ) {
                     Column(
-                        modifier = Modifier
-                            .padding(16.dp)
-                            .fillMaxWidth(),
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Text("Controls", style = MaterialTheme.typography.titleMedium)
+                        Text("🎛️ Controls", style = MaterialTheme.typography.titleMedium)
+
+                        // Record and Play Buttons
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center,
+                            horizontalArrangement = Arrangement.spacedBy(16.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Button(
                                 onClick = { onRecord() },
-                                modifier = Modifier.padding(8.dp)
+                                modifier = Modifier.weight(1f)
                             ) {
                                 Text(if (isRecording) "⏹️ Stop" else "⏺️ Record")
                             }
                             Button(
                                 onClick = { onPlayPause() },
-                                modifier = Modifier.padding(8.dp),
+                                modifier = Modifier.weight(1f),
                                 enabled = lastRecordedFile?.exists() == true
                             ) {
                                 Text(if (isPlaying) "⏸️ Pause" else "▶️ Play")
                             }
                         }
+
+                        // Display Recording Duration Below Buttons
+                        if (isRecording) {
+                            Text(
+                                text = "Recording Duration: ${recordingDuration}s",
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+
+                        // Playback Controls
                         if (!isRecording && lastRecordedFile?.exists() == true) {
-                            Spacer(modifier = Modifier.height(16.dp))
-                            Text("Playback", style = MaterialTheme.typography.titleMedium)
+                            Text("🎵 Playback", style = MaterialTheme.typography.titleSmall)
                             PlaybackSeekBar(
                                 position = playbackPosition,
                                 duration = playbackDuration,
@@ -206,62 +248,71 @@ class MainActivity : ComponentActivity() {
                                 onSeek = { onSeek(it) }
                             )
                         }
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Text("File Size", style = MaterialTheme.typography.titleMedium)
-                        Text("📦 ${fileSize / 1024} KB", style = MaterialTheme.typography.bodyLarge)
+
+                        // File Size Display
+                        Text("📦 File Size", style = MaterialTheme.typography.titleSmall)
+                        Text("${fileSize / 1024} KB", style = MaterialTheme.typography.bodyLarge)
                     }
                 }
-                Spacer(modifier = Modifier.height(16.dp))
-                Button(onClick = {
-                    val intent = Intent(this@MainActivity, FileDetailsActivity::class.java)
-                    startActivity(intent)
-                }, modifier = Modifier.fillMaxWidth(0.7f)) {
-                    Text("📋 Show Details Log")
-                }
-                Spacer(modifier = Modifier.height(12.dp))
-                // Run experiment button
-                Button(
-                    onClick = {
-                        // start experiment
-                        if (!isRunningExperiment) runExperiment()
-                    },
-                    modifier = Modifier.fillMaxWidth(0.7f),
-                    enabled = !isRunningExperiment
+
+                // Log and Experiment Actions
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth(0.95f)
+                        .padding(horizontal = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Text(if (isRunningExperiment) "Running experiment..." else "▶️ Run Experiment")
-                }
-                if (isRunningExperiment) {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(experimentStatus, style = MaterialTheme.typography.bodySmall)
-                    Spacer(modifier = Modifier.height(8.dp))
-                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth(0.7f))
-                }
-                Spacer(modifier = Modifier.height(16.dp))
-                // Playback position updater
-                LaunchedEffect(isPlaying) {
-                    while (isPlaying && playbackDuration > 0) {
-                        mediaPlayer?.let {
-                            playbackPosition = it.currentPosition.toFloat() / playbackDuration
-                        }
-                        delay(200)
+                    Button(
+                        onClick = {
+                            val intent = Intent(this@MainActivity, FileDetailsActivity::class.java)
+                            startActivity(intent)
+                        },
+                        modifier = Modifier.fillMaxWidth(0.7f)
+                    ) {
+                        Text("📋 Show Details Log")
                     }
-                }
-                // Recording duration updater
-                if (isRecording) {
-                    LaunchedEffect(isRecording) {
-                        recordingStartTime = System.currentTimeMillis()
-                        while (isRecording) {
-                            recordingDuration = ((System.currentTimeMillis() - (recordingStartTime ?: 0)) / 1000).toInt()
-                            delay(1000)
+
+                    Button(
+                        onClick = {
+                            if (!isRunningExperiment) runExperiment()
+                        },
+                        modifier = Modifier.fillMaxWidth(0.7f),
+                        enabled = !isRunningExperiment
+                    ) {
+                        Text(if (isRunningExperiment) "⏳ Running experiment..." else "▶️ Run Experiment")
+                    }
+
+                    if (isRunningExperiment) {
+                        Text(experimentStatus, style = MaterialTheme.typography.bodySmall)
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth(0.7f))
+                    }
+                    // Playback position updater
+                    LaunchedEffect(isPlaying) {
+                        while (isPlaying && playbackDuration > 0) {
+                            mediaPlayer?.let {
+                                playbackPosition = it.currentPosition.toFloat() / playbackDuration
+                            }
+                            delay(200)
                         }
                     }
-                } else {
-                    recordingDuration = 0
-                    recordingStartTime = null
-                }
-                if (isRecording) {
-                    Text("Recording Duration: ${recordingDuration}s", style = MaterialTheme.typography.titleMedium)
-                    Spacer(modifier = Modifier.height(8.dp))
+                    // Recording duration updater
+                    if (isRecording) {
+                        LaunchedEffect(isRecording) {
+                            recordingStartTime = System.currentTimeMillis()
+                            while (isRecording) {
+                                recordingDuration = ((System.currentTimeMillis() - (recordingStartTime ?: 0)) / 1000).toInt()
+                                delay(1000)
+                            }
+                        }
+                    } else {
+                        recordingDuration = 0
+                        recordingStartTime = null
+                    }
+                    if (isRecording) {
+                        Text("Recording Duration: ${recordingDuration}s", style = MaterialTheme.typography.titleMedium)
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
                 }
             }
         }
@@ -346,61 +397,75 @@ class MainActivity : ComponentActivity() {
                 prepare()
                 start()
                 isRecording = true
+                println("Recording started: $outputFilePath")
             } catch (e: Exception) {
+                e.printStackTrace()
                 Toast.makeText(this@MainActivity, "Recording failed: ${e.message}", Toast.LENGTH_SHORT).show()
             }
         }
-    }
 
-    private fun startMediaCodecRecording() {
-        try {
-            val codec = MediaCodec.createEncoderByType("audio/opus")
-            val format = MediaFormat.createAudioFormat("audio/opus", sampleRate, 1)
-            format.setInteger(MediaFormat.KEY_BIT_RATE, bitRate)
-            format.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 16384)
-
-            codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
-            codec.start()
-
-            val outputFile = File(getExternalFilesDir(Environment.DIRECTORY_MUSIC), "recording_${System.currentTimeMillis()}.opus")
-            val outputStream = outputFile.outputStream()
-
-            val bufferInfo = MediaCodec.BufferInfo()
-            isRecording = true
-
-            Thread {
+        // Validate the file immediately after stopping the recording
+        lifecycleScope.launch {
+            delay(1000) // Wait for 1 second to ensure some data is written
+            val file = lastRecordedFile
+            if (file?.exists() == true) {
+                val extractor = MediaExtractor()
                 try {
-                    while (isRecording) {
-                        val outputBufferIndex = codec.dequeueOutputBuffer(bufferInfo, 10000)
-                        if (outputBufferIndex >= 0) {
-                            val encodedData = codec.getOutputBuffer(outputBufferIndex)
-                            if (encodedData != null && bufferInfo.size > 0) {
-                                val buffer = ByteArray(bufferInfo.size)
-                                encodedData.get(buffer)
-                                encodedData.clear()
-                                outputStream.write(buffer)
-                            }
-                            codec.releaseOutputBuffer(outputBufferIndex, false)
-                        }
+                    extractor.setDataSource(file.absolutePath)
+                    println("Validating recorded file: ${file.absolutePath}")
+                    for (i in 0 until extractor.trackCount) {
+                        val format = extractor.getTrackFormat(i)
+                        println("Track $i: $format")
                     }
                 } catch (e: Exception) {
                     e.printStackTrace()
+                    println("Error validating file: ${e.message}")
                 } finally {
-                    codec.stop()
-                    codec.release()
-                    outputStream.close()
+                    extractor.release()
                 }
-            }.start()
+            } else {
+                println("File does not exist or is invalid.")
+            }
+        }
+    }
+    private var recorder: AudioRecordCodecRecorder? = null
 
-            Toast.makeText(this, "MediaCodec recording started", Toast.LENGTH_SHORT).show()
-        } catch (e: Exception) {
-            e.printStackTrace()
-            Toast.makeText(this, "Failed to start MediaCodec recording: ${e.message}", Toast.LENGTH_SHORT).show()
+    @RequiresPermission(Manifest.permission.RECORD_AUDIO)
+    private fun startMediaCodecRecording() {
+        val timestamp = DateFormat.format("yyyyMMdd_HHmmss", System.currentTimeMillis())
+        val fileName = "recording_${timestamp}${selectedFormat}"
+        val outputFile = File(getExternalFilesDir(Environment.DIRECTORY_MUSIC), fileName)
+        recorder = AudioRecordCodecRecorder(
+            outputFile = outputFile,
+            sampleRate = sampleRate,
+        )
+        recorder?.let {
+            it.apply {
+                try {
+                    start()
+                    recorder = this
+                    lastRecordedFile = outputFile
+                    isRecording = true
+                    println("MediaCodec recording started: ${outputFile.absolutePath}")
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                    println("Error starting MediaCodec recording: ${e.message}")
+                    Toast.makeText(
+                        this@MainActivity,
+                        "Failed to start MediaCodec recording: ${e.message}",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            }
+        } ?: run {
+            println("Recorder initialization failed.")
+            Toast.makeText(this, "Recorder initialization failed.", Toast.LENGTH_SHORT).show()
         }
     }
 
     private fun stopMediaCodecRecording() {
         try {
+            recorder?.stop()
             isRecording = false
             Toast.makeText(this, "MediaCodec recording stopped", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
@@ -482,9 +547,15 @@ class MainActivity : ComponentActivity() {
             return
         }
         if (isRecording) {
-            mediaRecorder?.stop()
-            mediaRecorder?.release()
-            mediaRecorder = null
+            when (selectedRecordingMethod) {
+                "MediaRecorder" -> {
+                    mediaRecorder?.stop()
+                    mediaRecorder?.release()
+                    mediaRecorder = null
+                }
+                "MediaCodec" -> stopMediaCodecRecording()
+                "libopus" -> stopLibOpusRecording()
+            }
             isRecording = false
             val file = lastRecordedFile
             fileSize = if (file?.exists() == true) file.length().toInt() else 0
@@ -527,17 +598,56 @@ class MainActivity : ComponentActivity() {
     private fun preparePlayback() {
         val file = lastRecordedFile
         if (file?.exists() == true) {
-            mediaPlayer?.release()
-            mediaPlayer = MediaPlayer().apply {
-                setDataSource(file.absolutePath)
-                prepare()
-                playbackDuration = duration
-                setOnCompletionListener {
-                    this@MainActivity.isPlaying = false
-                    playbackPosition = 0f
+            try {
+                // Log file details for debugging
+                val fileSize = file.length()
+                val filePath = file.absolutePath
+                println("Attempting to play file: $filePath (Size: $fileSize bytes)")
+
+                // Validate file properties using MediaExtractor
+                val extractor = MediaExtractor()
+                extractor.setDataSource(filePath)
+                var mimeType: String? = null
+                var duration: Long = 0
+                for (i in 0 until extractor.trackCount) {
+                    val format = extractor.getTrackFormat(i)
+                    mimeType = format.getString(MediaFormat.KEY_MIME)
+                    if (format.containsKey(MediaFormat.KEY_DURATION)) {
+                        duration = format.getLong(MediaFormat.KEY_DURATION)
+                    }
+                    if (mimeType != null && mimeType.startsWith("audio/")) {
+                        break
+                    }
                 }
+                extractor.release()
+
+                println("File MIME type: $mimeType, Duration: ${duration / 1000} seconds")
+
+                if (mimeType == null || !mimeType.startsWith("audio/")) {
+                    Toast.makeText(this, "Invalid audio file format.", Toast.LENGTH_LONG).show()
+                    return
+                }
+
+                mediaPlayer?.release()
+                mediaPlayer = MediaPlayer().apply {
+                    setDataSource(filePath)
+                    prepare()
+                    playbackDuration = duration.toInt() / 1000
+                    setOnCompletionListener {
+                        this@MainActivity.isPlaying = false
+                        playbackPosition = 0f
+                    }
+                }
+                playbackPosition = 0f
+            } catch (e: IOException) {
+                e.printStackTrace()
+                Toast.makeText(this, "Unable to play the file. Ensure it is in a supported format.", Toast.LENGTH_LONG).show()
+            } catch (e: Exception) {
+                e.printStackTrace()
+                Toast.makeText(this, "An error occurred while validating the file.", Toast.LENGTH_LONG).show()
             }
-            playbackPosition = 0f
+        } else {
+            Toast.makeText(this, "File does not exist or is invalid.", Toast.LENGTH_LONG).show()
         }
     }
 
