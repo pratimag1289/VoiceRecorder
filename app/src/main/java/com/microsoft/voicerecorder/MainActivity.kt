@@ -34,8 +34,10 @@ import androidx.core.content.FileProvider
 import com.microsoft.voicerecorder.ui.theme.VoiceRecorderTheme
 import java.io.File
 import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.IOException
 
 class MainActivity : ComponentActivity() {
@@ -472,6 +474,69 @@ class MainActivity : ComponentActivity() {
             e.printStackTrace()
             Toast.makeText(this, "Failed to stop MediaCodec recording: ${e.message}", Toast.LENGTH_SHORT).show()
         }
+    }
+
+    private fun startOpusRecording() {
+        val pcmFile = File(getExternalFilesDir(Environment.DIRECTORY_MUSIC), "recording_${System.currentTimeMillis()}.pcm")
+        val opusFile = File(getExternalFilesDir(Environment.DIRECTORY_MUSIC), "recording_${System.currentTimeMillis()}.opus")
+
+        recorder = AudioRecordCodecRecorder(
+            outputFile = pcmFile,
+            sampleRate = sampleRate,
+            bitrate = bitRate
+        )
+
+        recorder?.let {
+            try {
+                it.start()
+                isRecording = true
+                println("PCM recording started: ${pcmFile.absolutePath}")
+
+                // Launch a coroutine to encode PCM to Opus
+                lifecycleScope.launch {
+                    try {
+                        encodePcmToOpus(pcmFile, opusFile)
+                        println("Opus encoding completed: ${opusFile.absolutePath}")
+                        lastRecordedFile = opusFile
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                        println("Error during Opus encoding: ${e.message}")
+                    }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                println("Error starting PCM recording: ${e.message}")
+                Toast.makeText(this, "Failed to start PCM recording: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
+        } ?: run {
+            println("Recorder initialization failed.")
+            Toast.makeText(this, "Recorder initialization failed.", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private suspend fun encodePcmToOpus(pcmFile: File, opusFile: File) {
+        withContext(Dispatchers.IO) {
+            // Placeholder for libopus encoding logic
+            // Use a library like OpusTool or JNI bindings to encode PCM to Opus
+            println("Encoding PCM to Opus: ${pcmFile.absolutePath} -> ${opusFile.absolutePath}")
+        }
+    }
+
+    private fun generateWaveform(pcmFile: File): List<Int> {
+        val waveform = mutableListOf<Int>()
+        try {
+            val inputStream = pcmFile.inputStream()
+            val buffer = ByteArray(2) // 16-bit PCM
+            while (inputStream.read(buffer) != -1) {
+                val sample = (buffer[1].toInt() shl 8) or (buffer[0].toInt() and 0xFF)
+                waveform.add(sample)
+            }
+            inputStream.close()
+        } catch (e: Exception) {
+            e.printStackTrace()
+            println("Error generating waveform: ${e.message}")
+        }
+        return waveform
     }
 
     private fun startLibOpusRecording() {
